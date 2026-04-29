@@ -1,6 +1,42 @@
 import express from 'express';
 import crypto from 'crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { runZloginLoginTest } from './zlogin_login.mjs';
+
+
+function loadDotEnvFile() {
+  if (process.env.CHAINAUTH_SKIP_DOTENV === '1') {
+    return;
+  }
+
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = path.dirname(__filename);
+  const envPath = path.resolve(__dirname, '..', '.env');
+
+  if (!fs.existsSync(envPath)) {
+    return;
+  }
+
+  const lines = fs.readFileSync(envPath, 'utf8').split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#') || !trimmed.includes('=')) {
+      continue;
+    }
+
+    const index = trimmed.indexOf('=');
+    const key = trimmed.slice(0, index).trim();
+    const value = trimmed.slice(index + 1).trim().replace(/^["']|["']$/g, '');
+
+    if (key && process.env[key] === undefined) {
+      process.env[key] = value;
+    }
+  }
+}
+
+loadDotEnvFile();
 
 const sessions = new Map();
 
@@ -131,5 +167,5 @@ app.post('/login/zlogin/mfa', requireAuth, async (req, res) => {
 });
 
 app.listen(port, () => {
-  console.log(`chainauth-worker listening on ${port}`);
+  console.log(`chainauth-worker listening on http://127.0.0.1:${port}`);
 });

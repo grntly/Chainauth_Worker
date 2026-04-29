@@ -1,0 +1,10 @@
+services:
+  chainauth-worker:
+    build: .
+    container_name: chainauth-worker
+    ports:
+      - "8080:8080"
+    environment:
+      PORT: "8080"
+      WORKER_TOKEN: "${WORKER_TOKEN:-test123}"
+    restart: unless-stopped

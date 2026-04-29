@@ -4,6 +4,37 @@ Playwright/Chromium worker voor GRANTLY ketenmachtiging headless login-tests.
 
 ## Lokaal draaien
 
+### Snelste manier
+
+macOS/Linux:
+
+```bash
+./start-local.sh
+```
+
+Windows:
+
+```bat
+start-local.bat
+```
+
+De worker leest automatisch `.env`, installeert dependencies wanneer `node_modules` ontbreekt en start standaard op `http://127.0.0.1:8080`.
+
+### Via npm
+
+```bash
+npm install
+npm run start:local
+```
+
+### Via Docker Compose
+
+```bash
+docker compose up -d --build
+```
+
+### Via Docker handmatig
+
 ```bash
 docker build -t chainauth-worker .
 docker run --rm -p 8080:8080 -e WORKER_TOKEN=change-me chainauth-worker
@@ -33,5 +64,5 @@ curl -X POST http://127.0.0.1:8080/login/zlogin \
 
 Vul in de module settings:
 
-- Worker URL: `http://host.docker.internal:8080` of je publieke Cloud Run/Kubernetes URL
+- Worker URL: standaard `http://127.0.0.1:8080` lokaal, `http://host.docker.internal:8080` vanuit een Docker-container, of je publieke Cloud Run/Kubernetes URL
 - Worker token: dezelfde waarde als `WORKER_TOKEN`

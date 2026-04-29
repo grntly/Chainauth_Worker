@@ -5,7 +5,10 @@
   "private": true,
   "scripts": {
     "start": "node src/server.mjs",
-    "test:zlogin": "node src/zlogin_login.mjs"
+    "test:zlogin": "node src/zlogin_login.mjs",
+    "dev": "node src/server.mjs",
+    "start:local": "node src/server.mjs",
+    "health": "node -e \"fetch('http://127.0.0.1:'+(process.env.PORT||8080)+'/health').then(r=>r.json()).then(console.log).catch(e=>{console.error(e.message);process.exit(1)})\""
   },
   "dependencies": {
     "express": "^4.21.2",
