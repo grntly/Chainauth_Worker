@@ -50,6 +50,8 @@ async function main() {
   });
 
   const payload = {
+    provider_id: Number(providerId),
+    callback_token: callbackToken,
     start_url: optional('START_URL') || optional('LOGIN_URL') || 'https://zlogin.nl/',
     login_url: optional('LOGIN_URL'),
     username: process.env.USERNAME,
@@ -60,8 +62,23 @@ async function main() {
     submit_selector: optional('SUBMIT_SELECTOR'),
     success_url_contains: optional('SUCCESS_URL_CONTAINS'),
     timeout_ms: optional('TIMEOUT_MS') || '30000',
+    mfa_code_url: optional('MFA_CODE_URL'),
+    mfa_poll_timeout_ms: optional('MFA_POLL_TIMEOUT_MS') || '480000',
+    mfa_poll_interval_ms: optional('MFA_POLL_INTERVAL_MS') || '3000',
+    sms_selector: optional('SMS_SELECTOR'),
+    sms_submit_selector: optional('SMS_SUBMIT_SELECTOR'),
     user_agent: optional('USER_AGENT') || 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120 Safari/537.36 Grantly ChainAuth GitHub Runner/1.0',
     keep_browser_open_on_mfa: false,
+  };
+
+  payload.on_mfa_required = async (mfaResult) => {
+    await postCallback({
+      provider_id: Number(providerId),
+      status: 'mfa_required',
+      message: mfaResult.message || 'SMS-code vereist.',
+      session_id: String(providerId),
+      result: mfaResult,
+    });
   };
 
   const result = await runZloginLoginTest(payload).catch((error) => ({

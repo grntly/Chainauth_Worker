@@ -42,6 +42,15 @@ on:
       timeout_ms:
         description: "Timeout in ms"
         required: false
+      mfa_code_url:
+        description: "GRANTLY MFA code polling URL"
+        required: false
+      sms_selector:
+        description: "SMS input selector"
+        required: false
+      sms_submit_selector:
+        description: "SMS submit selector"
+        required: false
       user_agent:
         description: "User agent"
         required: false
@@ -81,5 +90,8 @@ jobs:
           SUBMIT_SELECTOR: ${{ github.event.inputs.submit_selector }}
           SUCCESS_URL_CONTAINS: ${{ github.event.inputs.success_url_contains }}
           TIMEOUT_MS: ${{ github.event.inputs.timeout_ms }}
+          MFA_CODE_URL: ${{ github.event.inputs.mfa_code_url }}
+          SMS_SELECTOR: ${{ github.event.inputs.sms_selector }}
+          SMS_SUBMIT_SELECTOR: ${{ github.event.inputs.sms_submit_selector }}
           USER_AGENT: ${{ github.event.inputs.user_agent }}
         run: node .github/scripts/run-dispatch.mjs
