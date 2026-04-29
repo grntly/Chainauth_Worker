@@ -1,0 +1,14 @@
+{
+  "name": "chainauth-worker",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node src/server.mjs",
+    "test:zlogin": "node src/zlogin_login.mjs"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "playwright": "^1.53.0"
+  }
+}
