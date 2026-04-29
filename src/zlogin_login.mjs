@@ -7,7 +7,16 @@ function coerceTimeout(payload) {
 
 async function clickOptionalLoginButton(page, payload, timeout) {
   if (payload.login_click_selector) {
-    await page.locator(payload.login_click_selector).first().click({ timeout });
+    await Promise.allSettled([
+      page.waitForLoadState('domcontentloaded', { timeout }),
+      page.locator(payload.login_click_selector).first().click({ timeout }),
+    ]);
+
+    await page.waitForLoadState('domcontentloaded', { timeout }).catch(() => {});
+    await page.waitForTimeout(1000);
+
+    console.log('URL AFTER LOGIN CLICK:', page.url());
+
     return true;
   }
 
@@ -79,6 +88,30 @@ export async function runZloginLoginTest(payload) {
 
     const currentUrl = page.url();
     const hasPasswordField = await page.locator(passwordSelector).first().isVisible({ timeout: 2500 }).catch(() => false);
+
+    if (currentUrl.includes('/Login/nl/Login/SMS')) {
+      if (payload.keep_browser_open_on_mfa) {
+        return {
+          success: false,
+          mfa_required: true,
+          message: 'SMS-code vereist.',
+          current_url: currentUrl,
+          stopped_after: 'sms_mfa',
+          browser,
+          context,
+          page,
+        };
+      }
+
+      return {
+        success: false,
+        mfa_required: true,
+        message: 'SMS-code vereist.',
+        current_url: currentUrl,
+        stopped_after: 'sms_mfa',
+      };
+    }
+
     const successUrlMatches = payload.success_url_contains
       ? currentUrl.includes(payload.success_url_contains)
       : false;
@@ -99,8 +132,10 @@ export async function runZloginLoginTest(payload) {
       stopped_after: 'login_attempt',
     };
   } finally {
-    await context.close();
-    await browser.close();
+    if (!payload.keep_browser_open_on_mfa) {
+      await context.close();
+      await browser.close();
+    }
   }
 }
 
