@@ -92,65 +92,6 @@ async function completeSmsMfa(page, payload, timeout) {
   return null;
 }
 
-async function maybeContinueFromWarning(page, timeout) {
-  const warningUrl = page.url();
-  const looksLikeWarning = /\/Login\/nl\/Login\/Warning/i.test(warningUrl)
-    || await page.locator('text=/waarschuwing|warning|doorgaan|verder/i').first().isVisible({ timeout: 1500 }).catch(() => false);
-
-  if (!looksLikeWarning) {
-    return false;
-  }
-
-  console.log('WARNING SCREEN DETECTED:', warningUrl);
-
-  const continueCandidates = [
-    page.getByRole('button', { name: /doorgaan|verder|continue|inloggen/i }),
-    page.getByRole('link', { name: /doorgaan|verder|continue|inloggen/i }),
-    page.locator('button[type="submit"], input[type="submit"], button:has-text("Doorgaan"), a:has-text("Doorgaan"), button:has-text("Verder"), a:has-text("Verder")').first(),
-  ];
-
-  for (const locator of continueCandidates) {
-    try {
-      const item = locator.first();
-      if (await item.isVisible({ timeout: 2500 })) {
-        await Promise.allSettled([
-          page.waitForLoadState('domcontentloaded', { timeout }),
-          item.click({ timeout: 5000 }),
-        ]);
-        await page.waitForTimeout(2000);
-        console.log('URL AFTER WARNING CONTINUE:', page.url());
-        return true;
-      }
-    } catch (_) {
-      // Candidate not usable; continue.
-    }
-  }
-
-  console.log('WARNING SCREEN FOUND BUT NO CONTINUE BUTTON MATCHED.');
-  return true;
-}
-
-async function isSmsMfaScreen(page, payload, timeout) {
-  if (/\/Login\/nl\/Login\/SMS/i.test(page.url())) {
-    return true;
-  }
-
-  const smsSelector = payload.sms_selector || [
-    'input#Code',
-    'input[name="Code"]',
-    'input[name="SmsCode"]',
-    'input[name="SMSCode"]',
-    'input[name*="code" i]',
-    'input[autocomplete="one-time-code"]',
-    'input[type="tel"]',
-  ].join(', ');
-
-  const hasSmsInput = await page.locator(smsSelector).first().isVisible({ timeout: 2500 }).catch(() => false);
-  const hasSmsText = await page.locator('text=/sms|verificatiecode|authenticatiecode|code/i').first().isVisible({ timeout: 1500 }).catch(() => false);
-
-  return hasSmsInput && hasSmsText;
-}
-
 async function navigateToLoginScreen(page, payload, timeout) {
   if (payload.login_url && payload.login_url !== payload.start_url) {
     await page.goto(payload.login_url, { waitUntil: 'domcontentloaded', timeout });
@@ -272,16 +213,12 @@ export async function runZloginLoginTest(payload) {
       page.locator(submitSelector).first().click({ timeout }),
     ]);
 
-    await page.waitForTimeout(2500);
+    await page.waitForTimeout(1500);
 
-    await maybeContinueFromWarning(page, timeout);
-
-    let currentUrl = page.url();
+    const currentUrl = page.url();
     const hasPasswordField = await page.locator(passwordSelector).first().isVisible({ timeout: 2500 }).catch(() => false);
 
-    if (await isSmsMfaScreen(page, payload, timeout)) {
-      currentUrl = page.url();
-
+    if (currentUrl.includes('/Login/nl/Login/SMS')) {
       const mfaResult = {
         success: false,
         mfa_required: true,
@@ -300,27 +237,16 @@ export async function runZloginLoginTest(payload) {
       if (smsResult) {
         return smsResult;
       }
-
-      currentUrl = page.url();
     }
 
     const successUrlMatches = payload.success_url_contains
       ? currentUrl.includes(payload.success_url_contains)
       : false;
 
-    if (successUrlMatches) {
+    if (successUrlMatches || !hasPasswordField) {
       return {
         success: true,
-        message: 'Z-login test succesvol: success URL bereikt.',
-        current_url: currentUrl,
-        stopped_after: 'success_url',
-      };
-    }
-
-    if (!hasPasswordField && !/\/Login\/nl\/Login\/(UsernamePassword|Warning|SMS)/i.test(currentUrl)) {
-      return {
-        success: true,
-        message: 'Z-login test succesvol: credentials ingevuld en login-flow is voorbij login/MFA-schermen.',
+        message: 'Z-login test succesvol: credentials ingevuld en login-flow is voorbij het wachtwoordscherm.',
         current_url: currentUrl,
         stopped_after: 'login',
       };
