@@ -1,12 +1,83 @@
 import { chromium } from 'playwright';
 
+class ChainauthCancelledError extends Error {
+  constructor(message = 'Workflow gestopt vanuit GRANTLY.', stoppedAfter = 'cancelled', currentUrl = '') {
+    super(message);
+    this.name = 'ChainauthCancelledError';
+    this.stoppedAfter = stoppedAfter;
+    this.currentUrl = currentUrl;
+  }
+}
+
 function coerceTimeout(payload) {
   const timeout = Number(payload.timeout_ms || 45000);
   return Math.max(5000, Math.min(120000, Number.isFinite(timeout) ? timeout : 45000));
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
-async function pollForMfaCode(payload, timeout) {
+async function postCallback(payload, body) {
+  if (!payload.callback_url) {
+    return;
+  }
+
+  await fetch(payload.callback_url, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${payload.callback_token || ''}`,
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      provider_id: payload.provider_id || null,
+      ...body,
+    }),
+  }).catch((error) => {
+    console.log(`Callback failed: ${error.message}`);
+  });
+}
+
+async function fetchMfaState(payload) {
+  const pollUrl = payload.mfa_code_url;
+  if (!pollUrl) {
+    return { ok: true, data: null, status: 0 };
+  }
+
+  const url = new URL(pollUrl);
+  url.searchParams.set('provider_id', String(payload.provider_id || ''));
+
+  const res = await fetch(url.toString(), {
+    method: 'GET',
+    headers: {
+      'Authorization': `Bearer ${payload.callback_token || ''}`,
+      'Accept': 'application/json',
+    },
+  }).catch((error) => ({ ok: false, status: 0, text: async () => error.message }));
+
+  const data = await res.json().catch(() => null);
+
+  return { ok: !!res.ok, status: Number(res.status || 0), data, res };
+}
+
+async function assertNotCancelled(payload, page = null, stoppedAfter = 'cancelled') {
+  if (!payload.mfa_code_url) {
+    return;
+  }
+
+  const state = await fetchMfaState(payload);
+  if (state.data && state.data.cancelled) {
+    const currentUrl = page ? page.url() : '';
+    throw new ChainauthCancelledError(
+      state.data.message || 'Workflow gestopt vanuit GRANTLY.',
+      stoppedAfter,
+      currentUrl
+    );
+  }
+}
+
+async function pollForMfaCode(payload, timeout, page = null) {
   const pollUrl = payload.mfa_code_url;
   if (!pollUrl) {
     console.log('MFA polling disabled: missing mfa_code_url');
@@ -17,65 +88,70 @@ async function pollForMfaCode(payload, timeout) {
   const interval = Math.max(1000, Number(payload.mfa_poll_interval_ms || 3000));
 
   while (Date.now() < deadline) {
-    const url = new URL(pollUrl);
-    url.searchParams.set('provider_id', String(payload.provider_id || ''));
-
-    const res = await fetch(url.toString(), {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${payload.callback_token || ''}`,
-        'Accept': 'application/json',
-      },
-    }).catch((error) => ({ ok: false, status: 0, text: async () => error.message }));
-
-    const data = await res.json().catch(() => null);
+    const state = await fetchMfaState(payload);
+    const data = state.data;
 
     if (data && data.cancelled) {
       console.log('MFA workflow was cancelled from GRANTLY.');
       return { cancelled: true, message: data.message || 'Workflow gestopt vanuit GRANTLY.' };
     }
 
-    if (res.ok) {
+    if (state.ok) {
       if (data && data.success && data.code) {
         console.log('MFA code received from GRANTLY, continuing same browser session.');
         return String(data.code).trim();
       }
       console.log('MFA code pending...');
     } else {
-      const text = data ? JSON.stringify(data) : await res.text().catch(() => '');
-      console.log(`MFA poll status: ${res.status} ${text}`);
+      const text = data ? JSON.stringify(data) : await state.res?.text?.().catch(() => '');
+      console.log(`MFA poll status: ${state.status} ${text || ''}`);
     }
 
-    await new Promise((resolve) => setTimeout(resolve, interval));
+    await sleep(interval);
+    await assertNotCancelled(payload, page, 'sms_mfa_cancelled');
   }
 
   return null;
 }
 
+async function isInvalidSmsCodeVisible(page, payload, timeout) {
+  const invalidSelector = payload.sms_invalid_selector || [
+    '.validation-summary-errors',
+    '.field-validation-error',
+    '.text-danger',
+    '.alert-danger',
+    '.error',
+    '[role="alert"]',
+  ].join(', ');
+
+  const invalidText = payload.sms_invalid_text || /ongeldig|onjuist|incorrect|invalid|verkeerd|fout|niet juist|probeer opnieuw/i;
+
+  const visibleError = await page.locator(invalidSelector).filter({ hasText: invalidText }).first().isVisible({ timeout: 1500 }).catch(() => false);
+  if (visibleError) {
+    return true;
+  }
+
+  const bodyText = await page.locator('body').innerText({ timeout: 1500 }).catch(() => '');
+  if (invalidText.test(bodyText)) {
+    return true;
+  }
+
+  const smsUrl = /\/Login\/nl\/Login\/SMS/i.test(page.url());
+  const inputStillVisible = await page.locator(payload.sms_selector || [
+    'input#Code',
+    'input[name="Code"]',
+    'input[name="SmsCode"]',
+    'input[name="SMSCode"]',
+    'input[name*="code" i]',
+    'input[autocomplete="one-time-code"]',
+    'input[type="tel"]',
+    'input[type="text"]',
+  ].join(', ')).first().isVisible({ timeout: 1500 }).catch(() => false);
+
+  return smsUrl && inputStillVisible;
+}
+
 async function completeSmsMfa(page, payload, timeout) {
-  const smsCode = await pollForMfaCode(payload, timeout);
-
-  if (smsCode && typeof smsCode === 'object' && smsCode.cancelled) {
-    return {
-      success: false,
-      mfa_required: false,
-      cancelled: true,
-      message: smsCode.message || 'Workflow gestopt vanuit GRANTLY.',
-      current_url: page.url(),
-      stopped_after: 'sms_mfa_cancelled',
-    };
-  }
-
-  if (!smsCode) {
-    return {
-      success: false,
-      mfa_required: true,
-      message: 'SMS-code vereist maar niet op tijd ontvangen in GRANTLY.',
-      current_url: page.url(),
-      stopped_after: 'sms_mfa_timeout',
-    };
-  }
-
   const smsSelector = payload.sms_selector || [
     'input#Code',
     'input[name="Code"]',
@@ -97,16 +173,87 @@ async function completeSmsMfa(page, payload, timeout) {
     'button:has-text("Inloggen")',
   ].join(', ');
 
-  await page.locator(smsSelector).first().waitFor({ state: 'visible', timeout });
-  await page.locator(smsSelector).first().fill(smsCode, { timeout });
+  const maxAttempts = Math.max(1, Math.min(5, Number(payload.sms_max_attempts || 3)));
 
-  await Promise.allSettled([
-    page.waitForLoadState('networkidle', { timeout }),
-    page.locator(submitSelector).first().click({ timeout }),
-  ]);
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    await assertNotCancelled(payload, page, 'sms_mfa_cancelled');
+    const smsCode = await pollForMfaCode(payload, timeout, page);
 
-  await page.waitForTimeout(2000);
-  return null;
+    if (smsCode && typeof smsCode === 'object' && smsCode.cancelled) {
+      return {
+        success: false,
+        mfa_required: false,
+        cancelled: true,
+        status: 'cancelled',
+        message: smsCode.message || 'Workflow gestopt vanuit GRANTLY.',
+        current_url: page.url(),
+        stopped_after: 'sms_mfa_cancelled',
+      };
+    }
+
+    if (!smsCode) {
+      return {
+        success: false,
+        mfa_required: true,
+        status: 'mfa_required',
+        message: 'SMS-code vereist maar niet op tijd ontvangen in GRANTLY.',
+        current_url: page.url(),
+        stopped_after: 'sms_mfa_timeout',
+      };
+    }
+
+    await page.locator(smsSelector).first().waitFor({ state: 'visible', timeout });
+    await page.locator(smsSelector).first().fill('', { timeout }).catch(() => {});
+    await page.locator(smsSelector).first().fill(smsCode, { timeout });
+
+    await Promise.allSettled([
+      page.locator(submitSelector).first().click({ timeout }),
+      page.waitForLoadState('networkidle', { timeout }),
+    ]);
+
+    await page.waitForTimeout(2500);
+    await assertNotCancelled(payload, page, 'sms_mfa_cancelled');
+
+    if (await isInvalidSmsCodeVisible(page, payload, timeout)) {
+      const message = attempt >= maxAttempts
+        ? 'SMS-code is ongeldig. Maximaal aantal pogingen bereikt.'
+        : 'SMS-code is ongeldig of geweigerd. Vul een nieuwe SMS-code in GRANTLY in.';
+
+      await postCallback(payload, {
+        status: attempt >= maxAttempts ? 'failed' : 'mfa_required',
+        success: false,
+        mfa_required: attempt < maxAttempts,
+        message,
+        current_url: page.url(),
+        stopped_after: 'sms_mfa_invalid_code',
+      });
+
+      if (attempt >= maxAttempts) {
+        return {
+          success: false,
+          mfa_required: false,
+          status: 'failed',
+          message,
+          current_url: page.url(),
+          stopped_after: 'sms_mfa_invalid_code',
+        };
+      }
+
+      console.log('Invalid SMS code detected; waiting for a new MFA code from GRANTLY.');
+      continue;
+    }
+
+    return null;
+  }
+
+  return {
+    success: false,
+    mfa_required: false,
+    status: 'failed',
+    message: 'SMS-code kon niet worden bevestigd.',
+    current_url: page.url(),
+    stopped_after: 'sms_mfa_failed',
+  };
 }
 
 async function navigateToLoginScreen(page, payload, timeout) {
@@ -132,7 +279,6 @@ async function navigateToLoginScreen(page, payload, timeout) {
     return;
   }
 
-  // Z-login homepage: eerst naar "Mijn Z login" / UsernamePassword scherm.
   const directLoginLink = page
     .locator('a[href*="/Login/nl/Login/UsernamePassword"], a[href*="login.zlogin.nl"][href*="UsernamePassword"]')
     .first();
@@ -215,36 +361,45 @@ export async function runZloginLoginTest(payload) {
   const page = await context.newPage();
 
   try {
+    await assertNotCancelled(payload, page, 'before_start');
+
     await page.goto(startUrl, { waitUntil: 'domcontentloaded', timeout });
     console.log('URL AFTER START GOTO:', page.url());
+    await assertNotCancelled(payload, page, 'after_start_goto');
 
     await navigateToLoginScreen(page, payload, timeout);
+    await assertNotCancelled(payload, page, 'after_login_navigation');
 
     const { usernameSelector, passwordSelector } = await waitForLoginForm(page, payload, timeout);
+    await assertNotCancelled(payload, page, 'before_credentials');
 
     await page.locator(usernameSelector).first().fill(payload.username, { timeout });
     await page.locator(passwordSelector).first().fill(payload.password, { timeout });
 
     await Promise.allSettled([
-      page.waitForLoadState('networkidle', { timeout }),
       page.locator(submitSelector).first().click({ timeout }),
+      page.waitForLoadState('networkidle', { timeout }),
     ]);
 
     await page.waitForTimeout(1500);
+    await assertNotCancelled(payload, page, 'after_password_submit');
 
-    const currentUrl = page.url();
-    const hasPasswordField = await page.locator(passwordSelector).first().isVisible({ timeout: 2500 }).catch(() => false);
+    let currentUrl = page.url();
+    let hasPasswordField = await page.locator(passwordSelector).first().isVisible({ timeout: 2500 }).catch(() => false);
 
     if (currentUrl.includes('/Login/nl/Login/SMS')) {
       const mfaResult = {
         success: false,
         mfa_required: true,
+        status: 'mfa_required',
         message: 'SMS-code vereist. Vul de SMS-code in GRANTLY in; de GitHub Actions sessie blijft tijdelijk open.',
         current_url: currentUrl,
         stopped_after: 'sms_mfa',
         provider_id: payload.provider_id || null,
         session_id: String(payload.provider_id || ''),
       };
+
+      await postCallback(payload, mfaResult);
 
       if (typeof payload.on_mfa_required === 'function') {
         await payload.on_mfa_required(mfaResult);
@@ -254,6 +409,9 @@ export async function runZloginLoginTest(payload) {
       if (smsResult) {
         return smsResult;
       }
+
+      currentUrl = page.url();
+      hasPasswordField = await page.locator(passwordSelector).first().isVisible({ timeout: 2500 }).catch(() => false);
     }
 
     const successUrlMatches = payload.success_url_contains
@@ -263,7 +421,8 @@ export async function runZloginLoginTest(payload) {
     if (successUrlMatches || !hasPasswordField) {
       return {
         success: true,
-        message: 'Z-login test succesvol: credentials ingevuld en login-flow is voorbij het wachtwoordscherm.',
+        status: 'success',
+        message: 'Z-login test succesvol: credentials en SMS-flow zijn afgerond.',
         current_url: currentUrl,
         stopped_after: 'login',
       };
@@ -271,10 +430,24 @@ export async function runZloginLoginTest(payload) {
 
     return {
       success: false,
+      status: 'failed',
       message: 'Login is niet aantoonbaar gelukt; wachtwoordveld staat nog zichtbaar of success URL matcht niet.',
       current_url: currentUrl,
       stopped_after: 'login_attempt',
     };
+  } catch (error) {
+    if (error instanceof ChainauthCancelledError) {
+      return {
+        success: false,
+        status: 'cancelled',
+        cancelled: true,
+        message: error.message,
+        current_url: error.currentUrl || page.url(),
+        stopped_after: error.stoppedAfter || 'cancelled',
+      };
+    }
+
+    throw error;
   } finally {
     await context.close();
     await browser.close();
@@ -284,11 +457,28 @@ export async function runZloginLoginTest(payload) {
 if (process.argv[1] && process.argv[1].endsWith('zlogin_login.mjs') && process.env.CHAINAUTH_TEST_PAYLOAD) {
   const payload = JSON.parse(process.env.CHAINAUTH_TEST_PAYLOAD);
   runZloginLoginTest(payload)
-    .then((result) => {
+    .then(async (result) => {
+      await postCallback(payload, {
+        status: result.status || (result.success ? 'success' : (result.cancelled ? 'cancelled' : 'failed')),
+        success: !!result.success,
+        mfa_required: !!result.mfa_required,
+        message: result.message || '',
+        current_url: result.current_url || '',
+        stopped_after: result.stopped_after || '',
+      });
+
       console.log(JSON.stringify(result));
       process.exit(result.success ? 0 : 1);
     })
-    .catch((error) => {
+    .catch(async (error) => {
+      const payload = JSON.parse(process.env.CHAINAUTH_TEST_PAYLOAD || '{}');
+      await postCallback(payload, {
+        status: 'failed',
+        success: false,
+        message: error.message || String(error),
+        stopped_after: 'worker_exception',
+      });
+
       console.error(error);
       process.exit(1);
     });
