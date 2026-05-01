@@ -220,7 +220,7 @@ async function completeSmsMfa(page, payload, timeout) {
         : 'SMS-code is ongeldig of geweigerd. Vul een nieuwe SMS-code in GRANTLY in.';
 
       await postCallback(payload, {
-        status: attempt >= maxAttempts ? 'failed' : 'mfa_required',
+        status: attempt >= maxAttempts ? 'failed' : 'sms_invalid_code',
         success: false,
         mfa_required: attempt < maxAttempts,
         message,
