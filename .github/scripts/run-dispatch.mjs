@@ -91,13 +91,13 @@ async function main() {
 
   await postCallback({
     provider_id: Number(providerId),
-    status: result.success ? 'success' : (result.mfa_required ? 'mfa_required' : 'failed'),
+    status: result.success ? 'success' : (result.cancelled ? 'stopped' : (result.mfa_required ? 'mfa_required' : 'failed')),
     message: result.message || (result.success ? 'Login succesvol.' : 'Login mislukt.'),
     result,
   });
 
   if (!result.success) {
-    process.exitCode = result.mfa_required ? 0 : 1;
+    process.exitCode = (result.mfa_required || result.cancelled) ? 0 : 1;
   }
 }
 

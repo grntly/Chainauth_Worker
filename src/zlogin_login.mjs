@@ -28,15 +28,21 @@ async function pollForMfaCode(payload, timeout) {
       },
     }).catch((error) => ({ ok: false, status: 0, text: async () => error.message }));
 
+    const data = await res.json().catch(() => null);
+
+    if (data && data.cancelled) {
+      console.log('MFA workflow was cancelled from GRANTLY.');
+      return { cancelled: true, message: data.message || 'Workflow gestopt vanuit GRANTLY.' };
+    }
+
     if (res.ok) {
-      const data = await res.json().catch(() => null);
       if (data && data.success && data.code) {
         console.log('MFA code received from GRANTLY, continuing same browser session.');
         return String(data.code).trim();
       }
       console.log('MFA code pending...');
     } else {
-      const text = await res.text().catch(() => '');
+      const text = data ? JSON.stringify(data) : await res.text().catch(() => '');
       console.log(`MFA poll status: ${res.status} ${text}`);
     }
 
@@ -48,6 +54,17 @@ async function pollForMfaCode(payload, timeout) {
 
 async function completeSmsMfa(page, payload, timeout) {
   const smsCode = await pollForMfaCode(payload, timeout);
+
+  if (smsCode && typeof smsCode === 'object' && smsCode.cancelled) {
+    return {
+      success: false,
+      mfa_required: false,
+      cancelled: true,
+      message: smsCode.message || 'Workflow gestopt vanuit GRANTLY.',
+      current_url: page.url(),
+      stopped_after: 'sms_mfa_cancelled',
+    };
+  }
 
   if (!smsCode) {
     return {
