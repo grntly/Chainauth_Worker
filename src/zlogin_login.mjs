@@ -18,6 +18,31 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function sleepWithCancel(ms, payload, page = null, stoppedAfter = 'cancelled') {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    await sleep(Math.min(500, Math.max(0, deadline - Date.now())));
+    await assertNotCancelled(payload, page, stoppedAfter);
+  }
+}
+
+async function withCancellation(promise, payload, page = null, stoppedAfter = 'cancelled') {
+  let finished = false;
+
+  const cancelWatcher = (async () => {
+    while (!finished) {
+      await sleep(500);
+      await assertNotCancelled(payload, page, stoppedAfter);
+    }
+  })();
+
+  try {
+    return await Promise.race([promise, cancelWatcher]);
+  } finally {
+    finished = true;
+  }
+}
+
 async function postCallback(payload, body) {
   if (!payload.callback_url) {
     return;
@@ -107,8 +132,7 @@ async function pollForMfaCode(payload, timeout, page = null) {
       console.log(`MFA poll status: ${state.status} ${text || ''}`);
     }
 
-    await sleep(interval);
-    await assertNotCancelled(payload, page, 'sms_mfa_cancelled');
+    await sleepWithCancel(interval, payload, page, 'sms_mfa_cancelled');
   }
 
   return null;
@@ -206,13 +230,12 @@ async function completeSmsMfa(page, payload, timeout) {
     await page.locator(smsSelector).first().fill('', { timeout }).catch(() => {});
     await page.locator(smsSelector).first().fill(smsCode, { timeout });
 
-    await Promise.allSettled([
+    await withCancellation(Promise.allSettled([
       page.locator(submitSelector).first().click({ timeout }),
       page.waitForLoadState('networkidle', { timeout }),
-    ]);
+    ]), payload, page, 'submit_sms_code');
 
-    await page.waitForTimeout(2500);
-    await assertNotCancelled(payload, page, 'sms_mfa_cancelled');
+    await sleepWithCancel(2500, payload, page, 'sms_mfa_cancelled');
 
     if (await isInvalidSmsCodeVisible(page, payload, timeout)) {
       const message = attempt >= maxAttempts
@@ -239,6 +262,7 @@ async function completeSmsMfa(page, payload, timeout) {
         };
       }
 
+      await page.locator(smsSelector).first().fill('', { timeout: 1500 }).catch(() => {});
       console.log('Invalid SMS code detected; waiting for a new MFA code from GRANTLY.');
       continue;
     }
@@ -258,7 +282,7 @@ async function completeSmsMfa(page, payload, timeout) {
 
 async function navigateToLoginScreen(page, payload, timeout) {
   if (payload.login_url && payload.login_url !== payload.start_url) {
-    await page.goto(payload.login_url, { waitUntil: 'domcontentloaded', timeout });
+    await withCancellation(page.goto(payload.login_url, { waitUntil: 'domcontentloaded', timeout }), payload, page, 'goto_login_url');
     await page.waitForLoadState('domcontentloaded', { timeout }).catch(() => {});
     console.log('URL AFTER LOGIN_URL GOTO:', page.url());
     return;
@@ -269,10 +293,10 @@ async function navigateToLoginScreen(page, payload, timeout) {
     const href = await link.getAttribute('href').catch(() => null);
 
     if (href) {
-      await page.goto(new URL(href, page.url()).toString(), { waitUntil: 'domcontentloaded', timeout });
+      await withCancellation(page.goto(new URL(href, page.url()).toString(), { waitUntil: 'domcontentloaded', timeout }), payload, page, 'goto_login_href');
     } else {
-      await link.click({ timeout });
-      await page.waitForLoadState('domcontentloaded', { timeout }).catch(() => {});
+      await withCancellation(link.click({ timeout }), payload, page, 'click_login_link');
+      await withCancellation(page.waitForLoadState('domcontentloaded', { timeout }).catch(() => {}), payload, page, 'after_click_login_link');
     }
 
     console.log('URL AFTER LOGIN CLICK:', page.url());
@@ -286,7 +310,7 @@ async function navigateToLoginScreen(page, payload, timeout) {
   if (await directLoginLink.count()) {
     const href = await directLoginLink.getAttribute('href').catch(() => null);
     if (href) {
-      await page.goto(new URL(href, page.url()).toString(), { waitUntil: 'domcontentloaded', timeout });
+      await withCancellation(page.goto(new URL(href, page.url()).toString(), { waitUntil: 'domcontentloaded', timeout }), payload, page, 'goto_login_href');
       console.log('URL AFTER ZLOGIN DIRECT LOGIN LINK:', page.url());
       return;
     }
@@ -304,10 +328,10 @@ async function navigateToLoginScreen(page, payload, timeout) {
       if (await item.isVisible({ timeout: 2500 })) {
         const href = await item.getAttribute('href').catch(() => null);
         if (href) {
-          await page.goto(new URL(href, page.url()).toString(), { waitUntil: 'domcontentloaded', timeout });
+          await withCancellation(page.goto(new URL(href, page.url()).toString(), { waitUntil: 'domcontentloaded', timeout }), payload, page, 'goto_login_href');
         } else {
-          await item.click({ timeout: 5000 });
-          await page.waitForLoadState('domcontentloaded', { timeout }).catch(() => {});
+          await withCancellation(item.click({ timeout: 5000 }), payload, page, 'click_auto_login');
+          await withCancellation(page.waitForLoadState('domcontentloaded', { timeout }).catch(() => {}), payload, page, 'after_click_auto_login');
         }
         console.log('URL AFTER AUTO LOGIN NAV:', page.url());
         return;
@@ -363,7 +387,7 @@ export async function runZloginLoginTest(payload) {
   try {
     await assertNotCancelled(payload, page, 'before_start');
 
-    await page.goto(startUrl, { waitUntil: 'domcontentloaded', timeout });
+    await withCancellation(page.goto(startUrl, { waitUntil: 'domcontentloaded', timeout }), payload, page, 'start_goto');
     console.log('URL AFTER START GOTO:', page.url());
     await assertNotCancelled(payload, page, 'after_start_goto');
 
@@ -373,16 +397,15 @@ export async function runZloginLoginTest(payload) {
     const { usernameSelector, passwordSelector } = await waitForLoginForm(page, payload, timeout);
     await assertNotCancelled(payload, page, 'before_credentials');
 
-    await page.locator(usernameSelector).first().fill(payload.username, { timeout });
-    await page.locator(passwordSelector).first().fill(payload.password, { timeout });
+    await withCancellation(page.locator(usernameSelector).first().fill(payload.username, { timeout }), payload, page, 'fill_username');
+    await withCancellation(page.locator(passwordSelector).first().fill(payload.password, { timeout }), payload, page, 'fill_password');
 
-    await Promise.allSettled([
+    await withCancellation(Promise.allSettled([
       page.locator(submitSelector).first().click({ timeout }),
       page.waitForLoadState('networkidle', { timeout }),
-    ]);
+    ]), payload, page, 'submit_credentials');
 
-    await page.waitForTimeout(1500);
-    await assertNotCancelled(payload, page, 'after_password_submit');
+    await sleepWithCancel(1500, payload, page, 'after_password_submit');
 
     let currentUrl = page.url();
     let hasPasswordField = await page.locator(passwordSelector).first().isVisible({ timeout: 2500 }).catch(() => false);
