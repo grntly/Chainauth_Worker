@@ -51,6 +51,7 @@ async function main() {
 
   const payload = {
     provider_id: Number(providerId),
+    callback_url: callbackUrl,
     callback_token: callbackToken,
     start_url: optional('START_URL') || optional('LOGIN_URL') || 'https://zlogin.nl/',
     login_url: optional('LOGIN_URL'),
