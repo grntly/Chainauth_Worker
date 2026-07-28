@@ -154,7 +154,7 @@ async function pollForMfaCode(payload, timeout, page = null) {
   return null;
 }
 
-async function isInvalidSmsCodeVisible(page, payload, timeout) {
+async function inspectSmsMfaResult(page, payload, timeout) {
   const invalidSelector = payload.sms_invalid_selector || [
     '.validation-summary-errors',
     '.field-validation-error',
@@ -166,14 +166,29 @@ async function isInvalidSmsCodeVisible(page, payload, timeout) {
 
   const invalidText = payload.sms_invalid_text || /ongeldig|onjuist|incorrect|invalid|verkeerd|fout|niet juist|probeer opnieuw/i;
 
-  const visibleError = await page.locator(invalidSelector).filter({ hasText: invalidText }).first().isVisible({ timeout: 1500 }).catch(() => false);
+  const visibleErrorLocator = page.locator(invalidSelector).filter({ hasText: invalidText }).first();
+  const visibleError = await visibleErrorLocator.isVisible({ timeout: 1500 }).catch(() => false);
   if (visibleError) {
-    return true;
+    const text = await visibleErrorLocator.innerText({ timeout: 1000 }).catch(() => '');
+    return {
+      invalid: true,
+      message: text.trim() || 'SMS-code is ongeldig of geweigerd.',
+      reason: 'visible_error',
+    };
   }
 
   const bodyText = await page.locator('body').innerText({ timeout: 1500 }).catch(() => '');
   if (invalidText.test(bodyText)) {
-    return true;
+    const line = bodyText
+      .split(/\r?\n/)
+      .map((item) => item.trim())
+      .find((item) => invalidText.test(item));
+
+    return {
+      invalid: true,
+      message: line || 'SMS-code is ongeldig of geweigerd.',
+      reason: 'body_error',
+    };
   }
 
   const smsUrl = /\/Login\/nl\/Login\/SMS/i.test(page.url());
@@ -188,7 +203,19 @@ async function isInvalidSmsCodeVisible(page, payload, timeout) {
     'input[type="text"]',
   ].join(', ')).first().isVisible({ timeout: 1500 }).catch(() => false);
 
-  return smsUrl && inputStillVisible;
+  if (smsUrl && inputStillVisible) {
+    return {
+      invalid: true,
+      message: 'Z-login bleef op het SMS-scherm staan na het verzenden. Controleer of de SMS-code klopt en probeer opnieuw.',
+      reason: 'sms_screen_still_visible',
+    };
+  }
+
+  return {
+    invalid: false,
+    message: '',
+    reason: '',
+  };
 }
 
 async function completeSmsMfa(page, payload, timeout) {
@@ -209,8 +236,15 @@ async function completeSmsMfa(page, payload, timeout) {
     'button[type="submit"]',
     'input[type="submit"]',
     'button:has-text("Bevestigen")',
+    'button:has-text("Bevestig")',
     'button:has-text("Doorgaan")',
+    'button:has-text("Verder")',
+    'button:has-text("Volgende")',
+    'button:has-text("Versturen")',
+    'button:has-text("Verzenden")',
     'button:has-text("Inloggen")',
+    'button:has-text("Next")',
+    'button:has-text("Submit")',
   ].join(', ');
 
   const maxAttempts = Math.max(1, Math.min(5, Number(payload.sms_max_attempts || 3)));
@@ -253,10 +287,13 @@ async function completeSmsMfa(page, payload, timeout) {
 
     await sleepWithCancel(2500, payload, page, 'sms_mfa_cancelled');
 
-    if (await isInvalidSmsCodeVisible(page, payload, timeout)) {
+    const smsResult = await inspectSmsMfaResult(page, payload, timeout);
+    if (smsResult.invalid) {
       const message = attempt >= maxAttempts
-        ? 'SMS-code is ongeldig. Maximaal aantal pogingen bereikt.'
-        : 'SMS-code is ongeldig of geweigerd. Vul een nieuwe SMS-code in GRANTLY in.';
+        ? `${smsResult.message} Maximaal aantal pogingen bereikt.`
+        : `${smsResult.message} Vul een nieuwe SMS-code in GRANTLY in.`;
+
+      console.log(`SMS MFA rejected (${smsResult.reason}): ${smsResult.message}`);
 
       await postCallback(payload, {
         status: attempt >= maxAttempts ? 'failed' : 'sms_invalid_code',
@@ -265,6 +302,7 @@ async function completeSmsMfa(page, payload, timeout) {
         message,
         current_url: page.url(),
         stopped_after: 'sms_mfa_invalid_code',
+        sms_error_reason: smsResult.reason,
       });
 
       if (attempt >= maxAttempts) {
