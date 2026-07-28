@@ -115,6 +115,56 @@ async function clickPostLoginText(page, text, timeout, payload, stoppedAfter) {
   return false;
 }
 
+async function pageLooksLikePermissions(page) {
+  const heading = page.getByRole('heading', { name: /^\s*Machtigingen\s*$/i }).first();
+  if (await heading.isVisible({ timeout: 2000 }).catch(() => false)) {
+    return true;
+  }
+
+  const permissionsContent = page.getByText(/Beheerdersmachtigingen|Algemene machtigingen|Algemene bevoegdheid/i).first();
+  if (await permissionsContent.isVisible({ timeout: 2000 }).catch(() => false)) {
+    return true;
+  }
+
+  return /machtigingen/i.test(page.url());
+}
+
+async function openPermissionsPage(page, payload, timeout, clickSelector, clickText) {
+  if (await pageLooksLikePermissions(page)) {
+    return true;
+  }
+
+  if (clickSelector) {
+    await withCancellation(page.locator(clickSelector).first().click({ timeout }), payload, page, 'post_login_click_selector');
+    await page.waitForLoadState('networkidle', { timeout }).catch(() => {});
+    if (await pageLooksLikePermissions(page)) {
+      return true;
+    }
+  }
+
+  if (clickText) {
+    const clicked = await clickPostLoginText(page, clickText, timeout, payload, 'post_login_click_text');
+    if (clicked && await pageLooksLikePermissions(page)) {
+      return true;
+    }
+  }
+
+  const sidebarTarget = page
+    .locator('a, button, [role="menuitem"], [role="tab"]')
+    .filter({ hasText: /^\s*machtigingen\s*$/i })
+    .first();
+
+  if (await sidebarTarget.isVisible({ timeout: 5000 }).catch(() => false)) {
+    await withCancellation(sidebarTarget.click({ timeout }), payload, page, 'post_login_click_permissions_menu');
+    await page.waitForLoadState('networkidle', { timeout }).catch(() => {});
+    if (await pageLooksLikePermissions(page)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 async function navigateAfterSuccessfulLogin(page, payload, timeout) {
   const targetUrl = String(payload.post_login_url || '').trim();
   const clickSelector = String(payload.post_login_click_selector || '').trim();
@@ -125,17 +175,11 @@ async function navigateAfterSuccessfulLogin(page, payload, timeout) {
   if (targetUrl) {
     await withCancellation(page.goto(new URL(targetUrl, page.url()).toString(), { waitUntil: 'domcontentloaded', timeout }), payload, page, 'post_login_goto');
     await page.waitForLoadState('networkidle', { timeout }).catch(() => {});
-    return;
   }
 
-  if (clickSelector) {
-    await withCancellation(page.locator(clickSelector).first().click({ timeout }), payload, page, 'post_login_click_selector');
-    await page.waitForLoadState('networkidle', { timeout }).catch(() => {});
-    return;
-  }
-
-  if (clickText) {
-    await clickPostLoginText(page, clickText, timeout, payload, 'post_login_click_text');
+  const openedPermissions = await openPermissionsPage(page, payload, timeout, clickSelector, clickText);
+  if (!openedPermissions) {
+    throw new Error('Kon na login de Machtigingen-pagina niet openen; Voeg toe is niet aangeklikt.');
   }
 
   if (addSelector) {
@@ -145,7 +189,10 @@ async function navigateAfterSuccessfulLogin(page, payload, timeout) {
   }
 
   if (addText) {
-    await clickPostLoginText(page, addText, timeout, payload, 'post_login_add_text');
+    const clickedAdd = await clickPostLoginText(page, addText, timeout, payload, 'post_login_add_text');
+    if (!clickedAdd) {
+      throw new Error('Machtigingen-pagina geopend, maar de knop Voeg toe is niet gevonden.');
+    }
   }
 }
 
