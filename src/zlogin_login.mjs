@@ -64,6 +64,19 @@ async function postCallback(payload, body) {
   });
 }
 
+async function captureScreenshotPayload(page, providerId) {
+  const buffer = await page.screenshot({
+    type: 'png',
+    fullPage: false,
+  });
+
+  return {
+    filename: `zlogin-success-${providerId || 'unknown'}-${Date.now()}.png`,
+    mime_type: 'image/png',
+    data: buffer.toString('base64'),
+  };
+}
+
 async function fetchMfaState(payload) {
   const pollUrl = payload.mfa_code_url;
   if (!pollUrl) {
@@ -442,12 +455,18 @@ export async function runZloginLoginTest(payload) {
       : false;
 
     if (successUrlMatches || !hasPasswordField) {
+      const screenshot = await captureScreenshotPayload(page, payload.provider_id || null).catch((error) => {
+        console.log(`Success screenshot failed: ${error.message}`);
+        return null;
+      });
+
       return {
         success: true,
         status: 'success',
         message: 'Z-login test succesvol: credentials en SMS-flow zijn afgerond.',
         current_url: currentUrl,
         stopped_after: 'login',
+        screenshot,
       };
     }
 
@@ -488,6 +507,7 @@ if (process.argv[1] && process.argv[1].endsWith('zlogin_login.mjs') && process.e
         message: result.message || '',
         current_url: result.current_url || '',
         stopped_after: result.stopped_after || '',
+        screenshot: result.screenshot || null,
       });
 
       console.log(JSON.stringify(result));
