@@ -95,6 +95,33 @@ async function waitForPageToSettleBeforeScreenshot(page, payload) {
   await sleep(delay);
 }
 
+async function navigateAfterSuccessfulLogin(page, payload, timeout) {
+  const targetUrl = String(payload.post_login_url || '').trim();
+  const clickSelector = String(payload.post_login_click_selector || '').trim();
+  const clickText = String(payload.post_login_click_text || 'machtigingen').trim();
+
+  if (targetUrl) {
+    await withCancellation(page.goto(new URL(targetUrl, page.url()).toString(), { waitUntil: 'domcontentloaded', timeout }), payload, page, 'post_login_goto');
+    await page.waitForLoadState('networkidle', { timeout }).catch(() => {});
+    return;
+  }
+
+  if (clickSelector) {
+    await withCancellation(page.locator(clickSelector).first().click({ timeout }), payload, page, 'post_login_click_selector');
+    await page.waitForLoadState('networkidle', { timeout }).catch(() => {});
+    return;
+  }
+
+  if (clickText) {
+    const exactText = new RegExp(`^\\s*${clickText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i');
+    const target = page.getByText(exactText).first();
+    if (await target.isVisible({ timeout: 5000 }).catch(() => false)) {
+      await withCancellation(target.click({ timeout }), payload, page, 'post_login_click_text');
+      await page.waitForLoadState('networkidle', { timeout }).catch(() => {});
+    }
+  }
+}
+
 async function fetchMfaState(payload) {
   const pollUrl = payload.mfa_code_url;
   if (!pollUrl) {
@@ -514,6 +541,7 @@ export async function runZloginLoginTest(payload) {
       : false;
 
     if (successUrlMatches || !hasPasswordField) {
+      await navigateAfterSuccessfulLogin(page, payload, timeout);
       await waitForPageToSettleBeforeScreenshot(page, payload);
       const screenshot = await captureScreenshotPayload(page, payload.provider_id || null).catch((error) => {
         console.log(`Success screenshot failed: ${error.message}`);

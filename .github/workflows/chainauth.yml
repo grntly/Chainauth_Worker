@@ -54,6 +54,15 @@ on:
       sms_submit_selector:
         description: "SMS submit selector"
         required: false
+      post_login_url:
+        description: "Optional URL to open after successful login"
+        required: false
+      post_login_click_selector:
+        description: "Optional selector to click after successful login"
+        required: false
+      post_login_click_text:
+        description: "Exact visible text to click after successful login"
+        required: false
       screenshot_delay_ms:
         description: "Delay before success screenshot in ms"
         required: false
@@ -103,6 +112,9 @@ jobs:
           MFA_POLL_TIMEOUT_MS: ${{ github.event.inputs.mfa_poll_timeout_ms }}
           SMS_SELECTOR: ${{ github.event.inputs.sms_selector }}
           SMS_SUBMIT_SELECTOR: ${{ github.event.inputs.sms_submit_selector }}
+          POST_LOGIN_URL: ${{ github.event.inputs.post_login_url }}
+          POST_LOGIN_CLICK_SELECTOR: ${{ github.event.inputs.post_login_click_selector }}
+          POST_LOGIN_CLICK_TEXT: ${{ github.event.inputs.post_login_click_text }}
           SCREENSHOT_DELAY_MS: ${{ github.event.inputs.screenshot_delay_ms }}
           SCREENSHOT_SETTLE_TIMEOUT_MS: ${{ github.event.inputs.screenshot_settle_timeout_ms }}
           USER_AGENT: ${{ github.event.inputs.user_agent }}
