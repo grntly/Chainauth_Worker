@@ -46,7 +46,7 @@ async function main() {
   await postCallback({
     provider_id: Number(providerId),
     status: 'running',
-    message: 'GitHub Actions ChainAuth login gestart.',
+    message: 'GitHub Actions runner gestart. Worker wordt voorbereid.',
   });
 
   const payload = {

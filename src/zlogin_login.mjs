@@ -64,6 +64,14 @@ async function postCallback(payload, body) {
   });
 }
 
+async function postProgress(payload, stage, message) {
+  await postCallback(payload, {
+    status: 'running',
+    stage,
+    message,
+  });
+}
+
 async function captureScreenshotPayload(page, providerId) {
   const buffer = await page.screenshot({
     type: 'png',
@@ -395,6 +403,8 @@ async function completeSmsMfa(page, payload, timeout) {
       };
     }
 
+    await postProgress(payload, 'sms_code_received', 'SMS-code ontvangen door worker. Code wordt gecontroleerd bij Z-login.');
+
     await page.locator(smsSelector).first().waitFor({ state: 'visible', timeout });
     await page.locator(smsSelector).first().fill('', { timeout }).catch(() => {});
     await page.locator(smsSelector).first().fill(smsCode, { timeout });
@@ -558,13 +568,16 @@ export async function runZloginLoginTest(payload) {
   const page = await context.newPage();
 
   try {
+    await postProgress(payload, 'browser_started', 'Browser gestart. Z-login wordt geopend.');
     await assertNotCancelled(payload, page, 'before_start');
 
     await withCancellation(page.goto(startUrl, { waitUntil: 'domcontentloaded', timeout }), payload, page, 'start_goto');
     console.log('URL AFTER START GOTO:', page.url());
+    await postProgress(payload, 'start_page_loaded', 'Z-login startpagina geladen.');
     await assertNotCancelled(payload, page, 'after_start_goto');
 
     await navigateToLoginScreen(page, payload, timeout);
+    await postProgress(payload, 'login_page_loaded', 'Loginpagina geopend. Credentials worden ingevuld.');
     await assertNotCancelled(payload, page, 'after_login_navigation');
 
     const { usernameSelector, passwordSelector } = await waitForLoginForm(page, payload, timeout);
@@ -577,6 +590,7 @@ export async function runZloginLoginTest(payload) {
       page.locator(submitSelector).first().click({ timeout }),
       page.waitForLoadState('networkidle', { timeout }),
     ]), payload, page, 'submit_credentials');
+    await postProgress(payload, 'credentials_submitted', 'Credentials verzonden. Wachten op SMS-controle.');
 
     await sleepWithCancel(1500, payload, page, 'after_password_submit');
 
@@ -606,6 +620,7 @@ export async function runZloginLoginTest(payload) {
         return smsResult;
       }
 
+      await postProgress(payload, 'sms_code_accepted', 'SMS-code geaccepteerd. Z-login dashboard wordt geopend.');
       currentUrl = page.url();
       hasPasswordField = await page.locator(passwordSelector).first().isVisible({ timeout: 2500 }).catch(() => false);
     }
@@ -615,7 +630,9 @@ export async function runZloginLoginTest(payload) {
       : false;
 
     if (successUrlMatches || !hasPasswordField) {
+      await postProgress(payload, 'post_login_navigation', 'Login gelukt. Machtigingen en Voeg toe worden geopend.');
       await navigateAfterSuccessfulLogin(page, payload, timeout);
+      await postProgress(payload, 'screenshot_preparing', 'Voeg toe staat open. Screenshot wordt gemaakt.');
       await waitForPageToSettleBeforeScreenshot(page, payload);
       currentUrl = page.url();
       const screenshot = await captureScreenshotPayload(page, payload.provider_id || null).catch((error) => {
