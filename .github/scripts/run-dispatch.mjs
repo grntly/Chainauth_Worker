@@ -71,6 +71,8 @@ async function main() {
     post_login_url: optional('POST_LOGIN_URL'),
     post_login_click_selector: optional('POST_LOGIN_CLICK_SELECTOR'),
     post_login_click_text: optional('POST_LOGIN_CLICK_TEXT') || 'machtigingen',
+    post_login_add_selector: optional('POST_LOGIN_ADD_SELECTOR'),
+    post_login_add_text: optional('POST_LOGIN_ADD_TEXT') || 'Voeg toe',
     screenshot_delay_ms: optional('SCREENSHOT_DELAY_MS'),
     screenshot_settle_timeout_ms: optional('SCREENSHOT_SETTLE_TIMEOUT_MS'),
     user_agent: optional('USER_AGENT') || 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120 Safari/537.36 Grantly ChainAuth GitHub Runner/1.0',

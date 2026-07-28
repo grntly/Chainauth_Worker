@@ -99,6 +99,8 @@ async function navigateAfterSuccessfulLogin(page, payload, timeout) {
   const targetUrl = String(payload.post_login_url || '').trim();
   const clickSelector = String(payload.post_login_click_selector || '').trim();
   const clickText = String(payload.post_login_click_text || 'machtigingen').trim();
+  const addSelector = String(payload.post_login_add_selector || '').trim();
+  const addText = String(payload.post_login_add_text || 'Voeg toe').trim();
 
   if (targetUrl) {
     await withCancellation(page.goto(new URL(targetUrl, page.url()).toString(), { waitUntil: 'domcontentloaded', timeout }), payload, page, 'post_login_goto');
@@ -117,6 +119,21 @@ async function navigateAfterSuccessfulLogin(page, payload, timeout) {
     const target = page.getByText(exactText).first();
     if (await target.isVisible({ timeout: 5000 }).catch(() => false)) {
       await withCancellation(target.click({ timeout }), payload, page, 'post_login_click_text');
+      await page.waitForLoadState('networkidle', { timeout }).catch(() => {});
+    }
+  }
+
+  if (addSelector) {
+    await withCancellation(page.locator(addSelector).first().click({ timeout }), payload, page, 'post_login_add_selector');
+    await page.waitForLoadState('networkidle', { timeout }).catch(() => {});
+    return;
+  }
+
+  if (addText) {
+    const exactAddText = new RegExp(`^\\s*${addText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i');
+    const addTarget = page.getByText(exactAddText).first();
+    if (await addTarget.isVisible({ timeout: 5000 }).catch(() => false)) {
+      await withCancellation(addTarget.click({ timeout }), payload, page, 'post_login_add_text');
       await page.waitForLoadState('networkidle', { timeout }).catch(() => {});
     }
   }

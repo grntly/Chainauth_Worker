@@ -63,6 +63,12 @@ on:
       post_login_click_text:
         description: "Exact visible text to click after successful login"
         required: false
+      post_login_add_selector:
+        description: "Optional add button selector after post-login navigation"
+        required: false
+      post_login_add_text:
+        description: "Exact visible add button text after post-login navigation"
+        required: false
       screenshot_delay_ms:
         description: "Delay before success screenshot in ms"
         required: false
@@ -115,6 +121,8 @@ jobs:
           POST_LOGIN_URL: ${{ github.event.inputs.post_login_url }}
           POST_LOGIN_CLICK_SELECTOR: ${{ github.event.inputs.post_login_click_selector }}
           POST_LOGIN_CLICK_TEXT: ${{ github.event.inputs.post_login_click_text }}
+          POST_LOGIN_ADD_SELECTOR: ${{ github.event.inputs.post_login_add_selector }}
+          POST_LOGIN_ADD_TEXT: ${{ github.event.inputs.post_login_add_text }}
           SCREENSHOT_DELAY_MS: ${{ github.event.inputs.screenshot_delay_ms }}
           SCREENSHOT_SETTLE_TIMEOUT_MS: ${{ github.event.inputs.screenshot_settle_timeout_ms }}
           USER_AGENT: ${{ github.event.inputs.user_agent }}
