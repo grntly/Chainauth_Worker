@@ -68,6 +68,8 @@ async function main() {
     mfa_poll_interval_ms: optional('MFA_POLL_INTERVAL_MS') || '3000',
     sms_selector: optional('SMS_SELECTOR'),
     sms_submit_selector: optional('SMS_SUBMIT_SELECTOR'),
+    screenshot_delay_ms: optional('SCREENSHOT_DELAY_MS'),
+    screenshot_settle_timeout_ms: optional('SCREENSHOT_SETTLE_TIMEOUT_MS'),
     user_agent: optional('USER_AGENT') || 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120 Safari/537.36 Grantly ChainAuth GitHub Runner/1.0',
     keep_browser_open_on_mfa: false,
   };

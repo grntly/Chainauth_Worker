@@ -77,6 +77,24 @@ async function captureScreenshotPayload(page, providerId) {
   };
 }
 
+async function waitForPageToSettleBeforeScreenshot(page, payload) {
+  const delay = Math.max(0, Math.min(15000, Number(payload.screenshot_delay_ms || 6000)));
+  const timeout = Math.max(3000, Math.min(20000, Number(payload.screenshot_settle_timeout_ms || 10000)));
+  const loaderSelector = payload.screenshot_loader_selector || [
+    '.spinner',
+    '.loader',
+    '.loading',
+    '.fa-spinner',
+    '.fa-spin',
+    '[role="progressbar"]',
+    '[aria-busy="true"]',
+  ].join(', ');
+
+  await page.waitForLoadState('networkidle', { timeout }).catch(() => {});
+  await page.locator(loaderSelector).first().waitFor({ state: 'hidden', timeout }).catch(() => {});
+  await sleep(delay);
+}
+
 async function fetchMfaState(payload) {
   const pollUrl = payload.mfa_code_url;
   if (!pollUrl) {
@@ -496,6 +514,7 @@ export async function runZloginLoginTest(payload) {
       : false;
 
     if (successUrlMatches || !hasPasswordField) {
+      await waitForPageToSettleBeforeScreenshot(page, payload);
       const screenshot = await captureScreenshotPayload(page, payload.provider_id || null).catch((error) => {
         console.log(`Success screenshot failed: ${error.message}`);
         return null;

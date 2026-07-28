@@ -54,6 +54,12 @@ on:
       sms_submit_selector:
         description: "SMS submit selector"
         required: false
+      screenshot_delay_ms:
+        description: "Delay before success screenshot in ms"
+        required: false
+      screenshot_settle_timeout_ms:
+        description: "Max wait for page to settle before screenshot in ms"
+        required: false
       user_agent:
         description: "User agent"
         required: false
@@ -97,5 +103,7 @@ jobs:
           MFA_POLL_TIMEOUT_MS: ${{ github.event.inputs.mfa_poll_timeout_ms }}
           SMS_SELECTOR: ${{ github.event.inputs.sms_selector }}
           SMS_SUBMIT_SELECTOR: ${{ github.event.inputs.sms_submit_selector }}
+          SCREENSHOT_DELAY_MS: ${{ github.event.inputs.screenshot_delay_ms }}
+          SCREENSHOT_SETTLE_TIMEOUT_MS: ${{ github.event.inputs.screenshot_settle_timeout_ms }}
           USER_AGENT: ${{ github.event.inputs.user_agent }}
         run: node .github/scripts/run-dispatch.mjs
