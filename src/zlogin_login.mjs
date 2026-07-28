@@ -204,7 +204,7 @@ async function navigateAfterSuccessfulLogin(page, payload, timeout) {
   }
 }
 
-async function fetchMfaState(payload) {
+async function fetchMfaState(payload, { consume = false } = {}) {
   const pollUrl = payload.mfa_code_url;
   if (!pollUrl) {
     return { ok: true, data: null, status: 0 };
@@ -212,6 +212,9 @@ async function fetchMfaState(payload) {
 
   const url = new URL(pollUrl);
   url.searchParams.set('provider_id', String(payload.provider_id || ''));
+  if (consume) {
+    url.searchParams.set('consume', '1');
+  }
   url.searchParams.set('_', String(Date.now()));
 
   const res = await fetch(url.toString(), {
@@ -235,6 +238,9 @@ async function assertNotCancelled(payload, page = null, stoppedAfter = 'cancelle
   }
 
   const state = await fetchMfaState(payload);
+  if (state.data && state.data.code) {
+    console.log('MFA code is available; leaving it for the MFA consumer.');
+  }
   if (state.data && state.data.cancelled) {
     const currentUrl = page ? page.url() : '';
     throw new ChainauthCancelledError(
@@ -256,7 +262,7 @@ async function pollForMfaCode(payload, timeout, page = null) {
   const interval = Math.max(1000, Number(payload.mfa_poll_interval_ms || 3000));
 
   while (Date.now() < deadline) {
-    const state = await fetchMfaState(payload);
+    const state = await fetchMfaState(payload, { consume: true });
     const data = state.data;
 
     if (data && data.cancelled) {
