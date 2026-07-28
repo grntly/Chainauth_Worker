@@ -85,12 +85,15 @@ async function fetchMfaState(payload) {
 
   const url = new URL(pollUrl);
   url.searchParams.set('provider_id', String(payload.provider_id || ''));
+  url.searchParams.set('_', String(Date.now()));
 
   const res = await fetch(url.toString(), {
     method: 'GET',
     headers: {
       'Authorization': `Bearer ${payload.callback_token || ''}`,
       'Accept': 'application/json',
+      'Cache-Control': 'no-store',
+      'Pragma': 'no-cache',
     },
   }).catch((error) => ({ ok: false, status: 0, text: async () => error.message }));
 
