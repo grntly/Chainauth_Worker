@@ -94,6 +94,7 @@ async function main() {
     provider_id: Number(providerId),
     status: result.success ? 'success' : (result.cancelled ? 'stopped' : (result.mfa_required ? 'mfa_required' : 'failed')),
     message: result.message || (result.success ? 'Login succesvol.' : 'Login mislukt.'),
+    screenshot: result.screenshot || null,
     result,
   });
 
