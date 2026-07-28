@@ -95,6 +95,26 @@ async function waitForPageToSettleBeforeScreenshot(page, payload) {
   await sleep(delay);
 }
 
+async function clickPostLoginText(page, text, timeout, payload, stoppedAfter) {
+  const escapedText = text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const exactText = new RegExp(`^\\s*(?:\\+\\s*)?${escapedText}\\s*$`, 'i');
+  const candidates = [
+    page.getByRole('button', { name: exactText }).first(),
+    page.getByRole('link', { name: exactText }).first(),
+    page.getByText(exactText).first(),
+  ];
+
+  for (const target of candidates) {
+    if (await target.isVisible({ timeout: 5000 }).catch(() => false)) {
+      await withCancellation(target.click({ timeout }), payload, page, stoppedAfter);
+      await page.waitForLoadState('networkidle', { timeout }).catch(() => {});
+      return true;
+    }
+  }
+
+  return false;
+}
+
 async function navigateAfterSuccessfulLogin(page, payload, timeout) {
   const targetUrl = String(payload.post_login_url || '').trim();
   const clickSelector = String(payload.post_login_click_selector || '').trim();
@@ -115,12 +135,7 @@ async function navigateAfterSuccessfulLogin(page, payload, timeout) {
   }
 
   if (clickText) {
-    const exactText = new RegExp(`^\\s*${clickText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i');
-    const target = page.getByText(exactText).first();
-    if (await target.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await withCancellation(target.click({ timeout }), payload, page, 'post_login_click_text');
-      await page.waitForLoadState('networkidle', { timeout }).catch(() => {});
-    }
+    await clickPostLoginText(page, clickText, timeout, payload, 'post_login_click_text');
   }
 
   if (addSelector) {
@@ -130,12 +145,7 @@ async function navigateAfterSuccessfulLogin(page, payload, timeout) {
   }
 
   if (addText) {
-    const exactAddText = new RegExp(`^\\s*${addText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i');
-    const addTarget = page.getByText(exactAddText).first();
-    if (await addTarget.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await withCancellation(addTarget.click({ timeout }), payload, page, 'post_login_add_text');
-      await page.waitForLoadState('networkidle', { timeout }).catch(() => {});
-    }
+    await clickPostLoginText(page, addText, timeout, payload, 'post_login_add_text');
   }
 }
 
@@ -560,6 +570,7 @@ export async function runZloginLoginTest(payload) {
     if (successUrlMatches || !hasPasswordField) {
       await navigateAfterSuccessfulLogin(page, payload, timeout);
       await waitForPageToSettleBeforeScreenshot(page, payload);
+      currentUrl = page.url();
       const screenshot = await captureScreenshotPayload(page, payload.provider_id || null).catch((error) => {
         console.log(`Success screenshot failed: ${error.message}`);
         return null;
